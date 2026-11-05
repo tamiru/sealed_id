@@ -1,0 +1,65 @@
+name: Test
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every supported Ruby with each Rails line it can run, using a sqlite3 that both accept.
+        include:
+          - { ruby: "2.7", active_record: "6.0", sqlite3: "1.6.0" }
+          - { ruby: "2.7", active_record: "6.1", sqlite3: "1.6.0" }
+          - { ruby: "2.7", active_record: "7.0", sqlite3: "1.6.0" }
+          - { ruby: "2.7", active_record: "7.1", sqlite3: "1.6.0" }
+          - { ruby: "3.0", active_record: "6.1", sqlite3: "1.4" }
+          - { ruby: "3.0", active_record: "7.0", sqlite3: "1.4" }
+          - { ruby: "3.0", active_record: "7.1", sqlite3: "1.4" }
+          - { ruby: "3.1", active_record: "6.1", sqlite3: "1.4" }
+          - { ruby: "3.1", active_record: "7.0", sqlite3: "1.4" }
+          - { ruby: "3.1", active_record: "7.1", sqlite3: "1.4" }
+          - { ruby: "3.1", active_record: "7.2", sqlite3: "1.4" }
+          - { ruby: "3.2", active_record: "7.0", sqlite3: "1.4" }
+          - { ruby: "3.2", active_record: "7.1", sqlite3: "1.4" }
+          - { ruby: "3.2", active_record: "7.2", sqlite3: "2.0" }
+          - { ruby: "3.2", active_record: "8.0", sqlite3: "2.1" }
+          - { ruby: "3.2", active_record: "8.1", sqlite3: "2.1" }
+          - { ruby: "3.3", active_record: "7.1", sqlite3: "1.4" }
+          - { ruby: "3.3", active_record: "7.2", sqlite3: "2.0" }
+          - { ruby: "3.3", active_record: "8.0", sqlite3: "2.1" }
+          - { ruby: "3.3", active_record: "8.1", sqlite3: "2.1" }
+          - { ruby: "3.4", active_record: "7.2", sqlite3: "2.0" }
+          - { ruby: "3.4", active_record: "8.0", sqlite3: "2.1" }
+          - { ruby: "3.4", active_record: "8.1", sqlite3: "2.1" }
+          - { ruby: "4.0", active_record: "8.0", sqlite3: "2.1" }
+          - { ruby: "4.0", active_record: "8.1", sqlite3: "2.1" }
+    # Set for the whole job: the Gemfile reads these, so they must also apply to setup-ruby's bundle install.
+    env:
+      ACTIVE_RECORD_VERSION: ${{ matrix.active_record }}
+      SQLITE3_VERSION: ${{ matrix.sqlite3 }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - name: Run tests
+        run: bundle exec rspec
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - name: Run rubocop
+        run: bundle exec rubocop

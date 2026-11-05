@@ -1,0 +1,37 @@
+plugins:
+  - rubocop-rspec
+AllCops:
+  TargetRubyVersion: 2.7
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - 'vendor/**/*'
+    - 'tmp/**/*'
+Gemspec/DevelopmentDependencies:
+  Enabled: false
+Layout/LineLength:
+  Max: 125
+Metrics/BlockLength:
+  Enabled: false
+Metrics/MethodLength:
+  Max: 20
+Metrics/AbcSize:
+  Max: 40
+Metrics/CyclomaticComplexity:
+  Max: 10
+Metrics/PerceivedComplexity:
+  Max: 10
+Style/Documentation:
+  Enabled: false
+Style/FrozenStringLiteralComment:
+  Enabled: false
+RSpec/DescribeClass:
+  Enabled: false
+RSpec/ExampleLength:
+  Max: 10
+RSpec/MultipleExpectations:
+  Max: 2
+RSpec/MultipleMemoizedHelpers:
+  Max: 6
+RSpec/ContextWording:
+  Enabled: false
