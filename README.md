@@ -27,10 +27,10 @@ Ruby 2.7 or newer, and Rails or ActiveRecord 6.0 to 8.1. Primary keys must be in
 
 ## Installation
 
-Add the gem to your Gemfile. It isn't on RubyGems yet, so install it from GitHub:
+Add the gem to your Gemfile:
 
 ```ruby
-gem "sealed_id", github: "tamiru/sealed_id"
+gem "sealed_id", "~> 0.1"
 ```
 
 ### Set a secret
@@ -164,6 +164,24 @@ If a leaked secret or being unable to revoke a token isn't acceptable for your d
 bundle install
 bundle exec rake
 ```
+
+### Publishing
+
+A matching `v*.*.*` tag publishes the gem using trusted publishing (OIDC), so the repository needs no registry secrets. Register a trusted publisher on [RubyGems](https://rubygems.org/gems/sealed_id) with these values:
+
+| Field | Value |
+| --- | --- |
+| Repository | `tamiru/sealed_id` |
+| Workflow | `release.yml` |
+| Environment | `release` |
+
+```bash
+# Bump the version in lib/sealed_id/version.rb and update CHANGELOG.md, then
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+If a publish fails, re-run the failed jobs. A version already on RubyGems is skipped, so a partial release can be finished safely.
 
 ## License
 

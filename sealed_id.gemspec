@@ -32,5 +32,11 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency 'simplecov', '>= 0.21', '< 1.0'
   spec.add_development_dependency 'sqlite3', '>= 1.4'
 
-  spec.metadata['rubygems_mfa_required'] = 'true'
+  spec.metadata = {
+    'source_code_uri' => spec.homepage,
+    'changelog_uri' => "#{spec.homepage}/blob/main/CHANGELOG.md",
+    'bug_tracker_uri' => "#{spec.homepage}/issues",
+    'allowed_push_host' => 'https://rubygems.org',
+    'rubygems_mfa_required' => 'true'
+  }
 end
