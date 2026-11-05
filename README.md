@@ -37,14 +37,15 @@ gem "sealed_id", github: "tamiru/sealed_id"
 
 Tokens are derived from a secret of at least 32 bytes. **Changing the secret changes every public URL**, so choose one you won't need to rotate.
 
-In Rails, the secret defaults to `secret_key_base`, but a dedicated value is safer because you can then rotate `secret_key_base` freely. Generate one with `bin/rails secret`, add it with `bin/rails credentials:edit`, then:
+The simplest way is an environment variable, which the gem reads automatically. Generate a value with `bin/rails secret`, then set it wherever the app runs:
 
-```ruby
-# config/initializers/sealed_id.rb
-SealedId.secret = Rails.application.credentials.sealed_id_secret!
+```
+SEALED_ID_SECRET=<your generated value>
 ```
 
-Outside Rails, you must set `SealedId.secret` yourself.
+Environments with the same value produce the same tokens, so a link or database copy from one works in another. Machines that share the production value can also decode and forge production tokens, so give production its own value unless you need this.
+
+The order of precedence is `secret:` on the model, then `SealedId.secret = ...` in an initializer, then `SEALED_ID_SECRET`. In Rails, `secret_key_base` is the fallback, which differs per environment and would change your links if rotated, so set a dedicated value in production. Outside Rails, there's no fallback.
 
 ## Usage
 
@@ -58,6 +59,18 @@ Foo.with_sealed_ids(a, b)    # a relation; raises SealedId::InvalidToken for an 
 
 `find` also accepts several tokens and respects scopes, so `current_user.foos.find(token)` only finds that user's records.
 
+### Finding the model from a token
+
+Every token records which model it belongs to, readable only with your secret:
+
+```ruby
+SealedId.model_for(token) # => Foo, or nil if the token isn't valid
+SealedId.locate(token)    # => the record, or nil
+SealedId.find(token)      # => the record, or raises ActiveRecord::RecordNotFound
+```
+
+`locate` and `find` search every model, so **always check that the caller may see the record they return**. For a request that should only reach one model, use `Foo.find(token)`, which refuses another model's token. With single-table inheritance, `model_for` returns the base class, and `locate` returns the actual subclass.
+
 ### Options
 
 ```ruby
@@ -65,7 +78,7 @@ sealed_id secret: ENV.fetch("FOO_SECRET"), # overrides SealedId.secret; may be c
           scope: "foos"                    # defaults to the base class name
 ```
 
-Tokens are tied to the `scope`, so a token for one model is never valid for another. Before renaming a model, set `scope` to its current class name, or its URLs will change.
+Tokens are tied to the `scope`, so a token for one model is never valid for another. Before renaming a model, set `scope` to its current class name, or its URLs will change. Each model needs its own scope: `SealedId.model_for` and the other lookups above raise `SealedId::Error` if two share one.
 
 ### Decoding form params
 
@@ -85,14 +98,7 @@ Polymorphic keys raise `ArgumentError`, because the model can't be known safely.
 
 ### Nested forms
 
-`fields_for` adds a hidden field holding the record's raw id, which `decode_params` refuses, so **an unchanged nested form returns a 404**. Emit the token instead:
-
-```erb
-<%= form.fields_for :kids, include_id: false do |kid| %>
-  <%= kid.hidden_field :id, value: kid.object.to_param %>
-  <%= kid.text_field :name %>
-<% end %>
-```
+`fields_for` works unchanged. It adds a hidden field holding the nested record's raw id, and `decode_params` keeps that one raw value, because nested attributes only ever match records already inside the parent's association. Other ids in nested attributes must still be tokens.
 
 ### Keeping old ids working
 
@@ -121,7 +127,7 @@ To look up a raw id string you produced yourself, use `SealedId.with_raw_ids { F
 
 ## Security notes
 
-- **Never pass a token to `delete`, `destroy_by`, `where(id:)`, `find_by(id:)` or `exists?`.** Only `find` and `with_sealed_ids` understand tokens. The others cast the string to an integer and act on **a different record**: `Foo.delete("7a3d54ce-...")` deletes record 7, whatever the token really refers to. Decode first with `Foo.unseal`, which returns `nil` for an invalid token.
+- **Some queries still don't understand tokens.** `find`, `where`, `find_by`, `exists?`, `delete`, `delete_by` and `destroy_by` all handle tokens for the primary key and `belongs_to` foreign keys. `where.not`, conditions on joined tables (`where(foos: { id: token })`) and raw SQL don't: they cast the string to an integer and act on **a different record**, so `"7a3d54ce-..."` becomes 7. The same applies to `legacy` ids in any query other than `find`. Decode first with `Foo.unseal`, which returns `nil` for an invalid token.
 - **This isn't access control.** Anyone holding a valid URL can use it, so always authorize access to the record you load.
 - **Decoding isn't authorization.** `decode_params` confirms a token is valid, not that this user may link to that record. Check that separately.
 - **`find` accepts integers.** A JSON body of `{"id": 3}` makes `params[:id]` an `Integer`, which `find` accepts because application code relies on it. Use `Foo.find(params[:id].to_s)` for ids from JSON. `decode_params` already refuses them.
@@ -129,11 +135,17 @@ To look up a raw id string you produced yourself, use `SealedId.with_raw_ids { F
 
 ## How it works
 
-Each id is encrypted and authenticated using HMAC-SHA256 with keys derived from your secret, then laid out as a valid version 8 UUID ([RFC 9562](https://www.rfc-editor.org/rfc/rfc9562)). The mapping is deterministic, so a record always has the same token, with no storage needed.
+Each token is one AES-256 block holding the 64-bit id, a 32-bit tag naming the model and 32 zero bits, using a key derived from your secret with HMAC-SHA256, then written in UUID format. The mapping is deterministic, so a record always has the same token, with no storage needed.
 
-Each id maps to exactly one of 2^122 possible values, and all others are rejected. With a strong secret, a guess succeeds with the same odds as guessing a random UUIDv4, and tokens don't show ids, their order or how many records exist.
+**Tokens are unique by construction.** All models using the same secret share one key, AES is one-to-one for a given key, and no two records have the same id and tag, so two records can't get the same token. This is a mathematical guarantee rather than a low probability, so there's no need for a unique index or for retrying on a collision. The exception is a model with its own `secret:`, where a clash with another model is only astronomically unlikely, as with random UUIDs.
 
-There are two limits to that. If two ids happen to share an internal 58-bit tag, their tokens reveal the XOR of those two ids. That only becomes likely at around 500 million records, and it exposes nothing else. This construction is also specific to this gem and **hasn't had an independent cryptographic review**.
+With a strong secret, tokens don't show ids, models, their order or how many records exist, knowing other id and token pairs doesn't help an attacker, and a guess is less likely to succeed than guessing a random UUIDv4. A changed token decrypts to random bits, which fail the tag and zero checks.
+
+There are three things to know:
+
+- **Tokens are shaped like UUIDs, but aren't valid under RFC 9562.** Their version and variant bits are random, because the full 128 bits hold the encrypted block. Databases and most parsers accept them, but a validator that checks for a specific UUID version will reject them.
+- **Your secret decides everything.** The gem refuses short or obviously repetitive secrets, but it can't measure randomness, so generate yours with `bin/rails secret`.
+- **This hasn't had an independent review.** AES is standard, but this gem's use of it hasn't been audited.
 
 | | sealed_id | Random UUID column |
 | --- | --- | --- |
@@ -155,4 +167,4 @@ bundle exec rake
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Finder behavior derives from [acts_as_hashids](https://github.com/dtaniwaki/acts_as_hashids) by Daisuke Taniwaki.
+MIT. See [LICENSE](LICENSE).

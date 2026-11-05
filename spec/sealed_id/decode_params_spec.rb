@@ -72,6 +72,19 @@ RSpec.describe SealedId::DecodeParams do
     expect(decoded[:bars_attributes]['0']).to eq('id' => 7, 'foo_id' => 5)
   end
 
+  it 'keeps the raw id fields_for emits for nested records' do
+    decoded = decode(Owner, bars_attributes: { '0' => { id: '7', foo_id: token } })
+    expect(decoded[:bars_attributes]['0']).to eq('id' => '7', 'foo_id' => 5)
+  end
+
+  it 'still refuses a raw foreign key inside nested attributes' do
+    expect { decode(Owner, bars_attributes: { '0' => { foo_id: '5' } }) }.to raise_error(SealedId::InvalidToken)
+  end
+
+  it 'still refuses a raw id at the top level' do
+    expect { decode(Bar, id: '7') }.to raise_error(SealedId::InvalidToken)
+  end
+
   it 'leaves other keys alone' do
     expect(decode(Bar, name: 'x', national_id: '12ab')).to eq('name' => 'x', 'national_id' => '12ab')
   end

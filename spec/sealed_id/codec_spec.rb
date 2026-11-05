@@ -1,14 +1,23 @@
 require 'securerandom'
 
 RSpec.describe SealedId::Codec do
-  subject(:codec) { described_class.new('k' * 32, 'Foo') }
+  subject(:codec) { described_class.new(TEST_SECRET, 'Foo') }
 
-  it 'produces a valid RFC 9562 version 8 UUID' do
-    expect(codec.encode(1)).to match(/\A[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/)
+  it 'produces a UUID-shaped token' do
+    expect(codec.encode(1)).to match(/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/)
   end
 
   it 'keeps the wire format stable, because changing it would break every existing URL' do
-    expect(codec.encode(1)).to eq 'e909cdbf-7657-8efe-b10f-f8f6814d684b'
+    expect(codec.encode(1)).to eq '52b3f823-016c-5262-b8ee-9658c76aac9f'
+  end
+
+  it 'matches an independent AES-256 calculation, so the format is the standard cipher and nothing else' do
+    key = OpenSSL::HMAC.digest('SHA256', TEST_SECRET, 'sealed_id/v1/aes')
+    cipher = OpenSSL::Cipher.new('aes-256-ecb').encrypt
+    cipher.key = key
+    cipher.padding = 0
+    block = [1].pack('Q>') + OpenSSL::Digest.digest('SHA256', 'Foo')[0, 4] + "\0\0\0\0".b
+    expect(codec.encode(1).delete('-')).to eq((cipher.update(block) + cipher.final).unpack1('H*'))
   end
 
   it 'gives consecutive ids unrelated values' do
@@ -40,17 +49,16 @@ RSpec.describe SealedId::Codec do
     expect(changed.filter_map { |t| codec.decode(t) }).to eq []
   end
 
-  it 'rejects random UUIDs of the same version' do
-    guesses = Array.new(5_000) { SecureRandom.uuid.sub(/\A(.{14})./, '\18') }
-    expect(guesses.filter_map { |t| codec.decode(t) }).to eq []
+  it 'rejects random UUIDs' do
+    expect(Array.new(5_000) { SecureRandom.uuid }.filter_map { |t| codec.decode(t) }).to eq []
   end
 
   it 'rejects a token from another secret' do
-    expect(codec.decode(described_class.new('z' * 32, 'Foo').encode(1))).to be_nil
+    expect(codec.decode(described_class.new(OTHER_SECRET, 'Foo').encode(1))).to be_nil
   end
 
   it 'rejects a token from another scope' do
-    expect(codec.decode(described_class.new('k' * 32, 'Bar').encode(1))).to be_nil
+    expect(codec.decode(described_class.new(TEST_SECRET, 'Bar').encode(1))).to be_nil
   end
 
   it 'rejects uppercase, so each id has one valid token' do
@@ -61,10 +69,26 @@ RSpec.describe SealedId::Codec do
     expect(codec.decode("#{codec.encode(1)}\n")).to be_nil
   end
 
-  [nil, '', 'short', 'k' * 31].each do |secret|
-    it "rejects the secret #{secret.inspect}" do
+  [nil, 1, '', "\xFF" * 16].each do |input|
+    it "rejects #{input.inspect[0, 20]}" do
+      expect(codec.decode(input)).to be_nil
+    end
+  end
+
+  [nil, '', 'short', 'abcdefgh' * 3].each do |secret|
+    it "rejects the short secret #{secret.inspect}" do
       expect { described_class.new(secret, 'Foo') }.to raise_error(ArgumentError, /32 bytes/)
     end
+  end
+
+  ['k' * 32, 'x' * 64, 'abc' * 20].each do |secret|
+    it "rejects the placeholder secret #{secret[0, 6]}..." do
+      expect { described_class.new(secret, 'Foo') }.to raise_error(ArgumentError, /random secret/)
+    end
+  end
+
+  it 'accepts a generated hex secret' do
+    expect { described_class.new(SecureRandom.hex(64), 'Foo') }.not_to raise_error
   end
 
   it 'gives the same results across threads' do

@@ -65,8 +65,43 @@ module SealedId
       end
     end
 
+    # Makes queries understand tokens. ActiveRecord would otherwise cast "7a3d54ce-..." to 7 and act on a different
+    # record, which is how Foo.delete(token) would remove the wrong row.
+    module RelationMethods
+      include FinderMethods
+
+      # Everything built on +where+ passes through here, including delete_by, destroy_by and Foo.delete.
+      def where!(opts, *rest)
+        opts = klass.sealed_conditions(opts) if opts.is_a?(Hash) && klass.respond_to?(:sealed_conditions)
+        super
+      end
+
+      def exists?(conditions = :none)
+        return super unless klass.respond_to?(:sealed_conditions)
+
+        conditions = { primary_key => conditions } if conditions.is_a?(String) && Codec::FORMAT.match?(conditions)
+        super(klass.sealed_conditions(conditions))
+      end
+    end
+
     module ClassMethods
       include FinderMethods
+
+      # Matches no record, for a token that isn't valid.
+      NO_RECORD = -1
+
+      # The class-level find_by has its own fast path, which skips +where+.
+      def find_by(arg, *args)
+        super(sealed_conditions(arg), *args)
+      end
+
+      # Replaces tokens in query conditions with the primary keys they stand for. A token is never right for an integer
+      # column, so this can't change what a correct query means.
+      def sealed_conditions(conditions)
+        return conditions unless conditions.is_a?(Hash)
+
+        conditions.to_h { |column, value| [column, sealed_condition_value(column.to_s, value)] }
+      end
 
       # Building a codec derives keys, so keep the last one. It is keyed by secret because a callable secret may vary,
       # and the pair is swapped in whole so concurrent readers never see a mismatch.
@@ -115,17 +150,31 @@ module SealedId
 
       def has_many(*args, &block) # rubocop:disable Naming/PredicatePrefix
         options = args.extract_options!
-        options[:extend] = Array(options[:extend]) + [FinderMethods]
+        options[:extend] = Array(options[:extend]) + [RelationMethods]
         super(*args, **options, &block)
       end
 
       def relation
         r = super
-        r.extend FinderMethods
+        r.extend RelationMethods
         r
       end
 
       private
+
+      def sealed_condition_value(column, value)
+        return value.map { |item| sealed_condition_value(column, item) } if value.is_a?(Array)
+        return value unless value.is_a?(String) && Codec::FORMAT.match?(value)
+        return value unless type_for_attribute(column).type == :integer
+
+        target = column == primary_key ? self : sealed_foreign_key_target(column)
+        (target.respond_to?(:unseal) && target.unseal(value)) || NO_RECORD
+      end
+
+      def sealed_foreign_key_target(column)
+        reflection = reflect_on_all_associations(:belongs_to).find { |r| r.foreign_key.to_s == column }
+        reflection.klass if reflection && !reflection.polymorphic?
+      end
 
       def unseal_legacy(token)
         legacy = sealed_id_options[:legacy]

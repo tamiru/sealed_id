@@ -10,7 +10,7 @@ Gem::Specification.new do |spec|
   spec.email         = ['tamiruhailu@gmail.com']
 
   spec.summary       = 'Unguessable, UUID-shaped public ids for ActiveRecord, with no migration.'
-  spec.description   = 'Encrypts integer primary keys into version 8 UUIDs for URLs, and refuses raw ids from requests.'
+  spec.description   = 'Encrypts integer primary keys into UUID-shaped tokens for URLs, and refuses raw ids from requests.'
   spec.homepage      = 'https://github.com/tamiru/sealed_id'
   spec.license       = 'MIT'
 

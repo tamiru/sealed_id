@@ -2,7 +2,8 @@ require 'sealed_id/model'
 
 module SealedId
   class Railtie < Rails::Railtie
-    # Runs before the app's config/initializers, so an initializer setting SealedId.secret takes precedence.
+    # Only applies when SEALED_ID_SECRET isn't set. Runs before the app's config/initializers, so an initializer
+    # setting SealedId.secret takes precedence.
     initializer 'sealed_id.default_secret' do
       SealedId.secret ||= -> { Rails.application.secret_key_base }
     end

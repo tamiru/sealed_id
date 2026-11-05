@@ -25,7 +25,9 @@ require 'sealed_id'
 
 GlobalID.app = 'test'
 SignedGlobalID.verifier = GlobalID::Verifier.new('verifier-secret')
-SealedId.secret = 'k' * 32
+TEST_SECRET = 'abcdefghijklmnopqrstuvwxyz012345'.freeze
+OTHER_SECRET = '543210zyxwvutsrqponmlkjihgfedcba'.freeze
+SealedId.secret = TEST_SECRET
 
 RSpec.configure do |config|
   config.mock_with(:rspec) { |mocks| mocks.verify_partial_doubles = true }

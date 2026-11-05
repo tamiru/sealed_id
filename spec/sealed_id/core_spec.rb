@@ -322,15 +322,15 @@ RSpec.describe SealedId::Core do
     end
 
     it 'uses a per-model secret over the global one' do
-      other = build_model(:foos, 'Foo', secret: 'z' * 32)
+      other = build_model(:foos, 'Foo', secret: OTHER_SECRET)
       expect(other.sealed_id_codec.encode(1)).not_to eq model.sealed_id_codec.encode(1)
     end
 
     it 'follows a callable secret that changes' do
-      current = 'a' * 32
+      current = TEST_SECRET
       klass = build_model(:foos, 'Foo', secret: -> { current })
       first = klass.sealed_id_codec.encode(1)
-      current = 'b' * 32
+      current = OTHER_SECRET
       expect(klass.sealed_id_codec.encode(1)).not_to eq first
     end
 

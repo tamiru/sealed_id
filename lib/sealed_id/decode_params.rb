@@ -6,7 +6,8 @@ module SealedId
   # Handles +id+, belongs_to foreign keys, +*_ids+ and nested +*_attributes+. Blank values stay as they are, so a form
   # can still clear an association. An invalid token raises SealedId::InvalidToken rather than becoming nil, which
   # would silently clear the association, or staying a string, which ActiveRecord would cast to the wrong integer.
-  # Integers are invalid too: this is the request boundary, and a raw id in a JSON body must not get through.
+  # Integers are invalid too: this is the request boundary, and a raw id in a JSON body must not get through. The one
+  # exception is the +id+ of a nested record, see raw_id?.
   module DecodeParams
     private
 
@@ -17,15 +18,15 @@ module SealedId
     module Decoder
       module_function
 
-      def call(model, params)
+      def call(model, params, nested: false)
         attributes = ActiveSupport::HashWithIndifferentAccess.new(params)
         attributes.each_with_object(ActiveSupport::HashWithIndifferentAccess.new) do |(key, value), decoded|
-          decoded[key] = decode_key(model, key.to_s, value)
+          decoded[key] = decode_key(model, key.to_s, value, nested)
         end
       end
 
-      def decode_key(model, key, value)
-        if key == 'id' then decode_token(model, value)
+      def decode_key(model, key, value, nested)
+        if key == 'id' then nested && raw_id?(value) ? value : decode_token(model, value)
         elsif key.end_with?('_ids') then decode_many(model, key, value)
         elsif key.end_with?('_id') then decode_foreign_key(model, key, value)
         elsif key.end_with?('_attributes') then decode_nested(model, key, value)
@@ -55,10 +56,16 @@ module SealedId
         reflection = model.reflect_on_association(key.delete_suffix('_attributes'))
         return value unless reflection
 
-        klass = reflection.klass
+        decode_nested_value(reflection.klass, value)
+      end
+
+      def decode_nested_value(klass, value)
         case value
-        when Array then value.map { |attributes| call(klass, attributes) }
-        when Hash then indexed?(value) ? value.transform_values { |attributes| call(klass, attributes) } : call(klass, value)
+        when Array then value.map { |attributes| call(klass, attributes, nested: true) }
+        when Hash
+          return call(klass, value, nested: true) unless indexed?(value)
+
+          value.transform_values { |attributes| call(klass, attributes, nested: true) }
         else value
         end
       end
@@ -66,6 +73,12 @@ module SealedId
       # Rails sends collections from forms as { "0" => {...}, "1" => {...} }.
       def indexed?(hash)
         hash.keys.all? { |key| key.to_s.match?(/\A\d+\z/) }
+      end
+
+      # fields_for emits the raw id of nested records. It is safe to keep, because nested attributes only ever match
+      # records already inside the parent's association, so it can't reach anyone else's.
+      def raw_id?(value)
+        value.to_s.match?(/\A\d+\z/)
       end
 
       def decode_token(klass, value)
